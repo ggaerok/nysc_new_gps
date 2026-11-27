@@ -75,6 +75,7 @@ pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space
   <button class="pri" id="btnOpen">방 열기</button>
   <button id="btnQR" disabled>QR / 링크</button>
   <button id="btnFit">전체 보기</button>
+  <button id="btnCal">지도 보정</button>
   <button class="bad" id="btnClose" disabled>방 종료</button>
   <button id="btnLogout" style="display:none">로그아웃</button>
 </header>
@@ -93,6 +94,7 @@ pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space
     <div class="mapctl">
       <select id="base"></select>
       <button id="btnTrail">이동경로 끔</button>
+      <button id="btnOp">이미지 투명도 100%</button>
     </div>
     <div class="legend">
       <span><i class="dot ok"></i>정상(75초 이내)</span><span><i class="dot warn"></i>지연</span>
@@ -120,6 +122,20 @@ pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space
   <p class="mut">이 주소는 방을 열 때마다 새로 만들어지며, 방을 종료하면 사용할 수 없습니다.<br>주소 안의 운영자 공개키(#뒤)는 서버로 전송되지 않습니다.</p>
 </div></div>
 
+<div class="modal" id="mCal"><div class="box" style="width:min(900px,94vw)">
+  <h2>지도 이미지 보정 (네이버 지도 캡처 ↔ 좌표 매칭)</h2>
+  <p class="mut">① 네이버 지도(북쪽이 위, 확대·축소만 한 상태)를 캡처해 불러옵니다. ② 이미지에서 위치가 확실한 지점 2곳(서로 멀리, 대각선 방향 권장)을 클릭합니다.
+  ③ 각 지점의 좌표를 구글맵에서 우클릭→좌표 복사로 가져와 붙여넣으면 이미지 전체 범위가 계산됩니다.</p>
+  <input type="file" id="calFile" accept="image/*">
+  <div style="margin:10px 0"><div class="calwrap" id="calWrap" style="display:none"><img id="calImg"></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <label>① <input id="c1" size="26" placeholder="위도, 경도 (예 34.5329, 127.4684)"></label>
+    <label>② <input id="c2" size="26" placeholder="위도, 경도"></label>
+    <button id="calApply" class="pri">적용</button><button id="calReset">초기화</button><button id="calClear">보정 해제</button><button id="calClose">닫기</button>
+  </div>
+  <p class="mut" id="calMsg"></p>
+  <pre id="calOut" style="display:none"></pre>
+</div></div>
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -141,14 +157,52 @@ const bases = {
   sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 18, attribution: 'Esri' }),
   osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' })
 };
-let curBase = null;
+let imgLayer = null, curBase = null;
+let imgOp = 1, hires = null, hiresOn = false;
+function syncHires() {   // 확대했을 때만 고해상도 이미지를 불러와 데이터 사용량을 아낌
+  if (!hires) return;
+  const want = curBase === imgLayer && imgLayer && map.getZoom() >= C.MAP_HIRES_MINZOOM;
+  if (want && !hiresOn) { hires.forEach(l => l.addTo(map)); hiresOn = true; }
+  else if (!want && hiresOn) { hires.forEach(l => map.removeLayer(l)); hiresOn = false; }
+  if (hiresOn) hires.forEach(l => l.setOpacity(imgOp));
+}
+map.on('zoomend', syncHires);
 function setBase(k) {
   if (curBase) map.removeLayer(curBase);
-  curBase = bases[k] || bases.sat; curBase.addTo(map); $('base').value = bases[k] ? k : 'sat';
+  if (imgLayer) map.removeLayer(imgLayer);
+  map.removeLayer(bases.sat); map.removeLayer(bases.osm);
+  if (k === 'img' && imgLayer) { bases.sat.addTo(map); imgLayer.setOpacity(imgOp); imgLayer.addTo(map); curBase = imgLayer; }   // 이미지 밖은 위성지도로 보완
+  else { curBase = bases[k] || bases.sat; curBase.addTo(map); }
+  syncHires();
+  $('base').value = k in bases || (k === 'img' && imgLayer) ? k : 'sat';
 }
-$('base').innerHTML = '<option value="sat">위성(Esri)</option><option value="osm">일반(OSM)</option>';
+function refreshBaseOptions() {
+  const o = [];
+  if (imgLayer) o.push(['img', '지도 이미지(네이버 캡처)']);
+  o.push(['sat', '위성(Esri)'], ['osm', '일반(OSM)']);
+  $('base').innerHTML = o.map(a => `<option value="${a[0]}">${a[1]}</option>`).join('');
+}
 $('base').onchange = e => setBase(e.target.value);
-setBase('sat');
+
+function buildImageLayer(url, b) { return L.imageOverlay(url, b, { opacity: 1, interactive: false }); }
+/* IndexedDB: 보정된 이미지는 이 브라우저에만 저장(서버 전송 없음) */
+const idb = {
+  open: () => new Promise((res, rej) => { const r = indexedDB.open('gt', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = rej; }),
+  async get(k) { const d = await this.open(); return new Promise(r => { const q = d.transaction('k').objectStore('k').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); },
+  async set(k, v) { const d = await this.open(); return new Promise(r => { const t = d.transaction('k', 'readwrite'); t.objectStore('k').put(v, k); t.oncomplete = r; }); },
+  async del(k) { const d = await this.open(); return new Promise(r => { const t = d.transaction('k', 'readwrite'); t.objectStore('k').delete(k); t.oncomplete = r; }); }
+};
+(async () => {
+  let cfg = C.MAP_IMAGE;
+  try {
+    const loc = JSON.parse(localStorage.getItem('gt_map_bounds') || 'null'), blob = await idb.get('img');
+    if (loc && blob) cfg = { url: URL.createObjectURL(blob), bounds: loc };
+  } catch (e) {}
+  if (cfg && cfg.url && cfg.bounds) imgLayer = buildImageLayer(cfg.url, cfg.bounds);
+  if (cfg === C.MAP_IMAGE && C.MAP_HIRES) hires = C.MAP_HIRES.map(t => buildImageLayer(t.url, t.bounds));
+  refreshBaseOptions(); setBase(imgLayer ? 'img' : 'sat');
+  if (imgLayer) map.setView(imgLayer.getBounds().getCenter(), C.ANCHOR.zoom);
+})();
 
 L.marker([C.ANCHOR.lat, C.ANCHOR.lng], { icon: L.divIcon({ className: '', html: '<div class="mk anchor"><i></i><b>기준점</b></div>', iconSize: [0, 0] }), interactive: false, zIndexOffset: -500 }).addTo(map);
 
@@ -208,6 +262,7 @@ $('btnFit').onclick = () => {
   pts.push([C.ANCHOR.lat, C.ANCHOR.lng]);
   map.fitBounds(pts, { padding: [60, 60], maxZoom: 19 });
 };
+$('btnOp').onclick = () => { imgOp = imgOp === 1 ? .6 : imgOp === .6 ? .3 : 1; $('btnOp').textContent = '이미지 투명도 ' + Math.round(imgOp * 100) + '%'; if (imgLayer) imgLayer.setOpacity(imgOp); syncHires(); };
 $('btnTrail').onclick = () => { showTrail = !showTrail; $('btnTrail').textContent = '이동경로 ' + (showTrail ? '켬' : '끔'); schedule(); };
 setInterval(schedule, 5000);
 
@@ -290,8 +345,46 @@ $('btnQR').onclick = showQR;
 $('btnQRClose').onclick = closeModals;
 $('btnCopy').onclick = async () => { try { await navigator.clipboard.writeText(room.url); toast('링크를 복사했습니다'); } catch (e) { $('joinUrl').select(); } };
 function closeModals() { document.querySelectorAll('.modal').forEach(m => m.classList.remove('show')); }
-document.querySelectorAll('.modal').forEach(m => m.addEventListener('mousedown', e => { if (e.target === m && m.id !== 'mLogin') closeModals(); }));
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('mousedown', e => { if (e.target === m && m.id !== 'mCal' && m.id !== 'mLogin') closeModals(); }));
 function showBanner(t, ms) { const b = $('banner'); b.textContent = t; b.style.display = 'block'; clearTimeout(showBanner.t); showBanner.t = setTimeout(() => b.style.display = 'none', ms || 7000); }
+
+/* ---------- 지도 보정 ---------- */
+let calPts = [], calSize = null, calBlob = null;
+const mercY = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+const mercInv = y => (2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180 / Math.PI;
+$('btnCal').onclick = () => { $('mCal').classList.add('show'); };
+$('calClose').onclick = closeModals;
+$('calReset').onclick = () => { calPts = []; drawPts(); $('calMsg').textContent = ''; };
+$('calFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return; calBlob = f;
+  const img = $('calImg'); img.onload = () => { calSize = [img.naturalWidth, img.naturalHeight]; $('calWrap').style.display = 'inline-block'; calPts = []; drawPts(); $('calMsg').textContent = `이미지 ${calSize[0]}×${calSize[1]} — 기준 지점 2곳을 클릭하세요.`; };
+  img.src = URL.createObjectURL(f);
+};
+$('calImg').onclick = e => {
+  if (calPts.length >= 2) return; const r = e.target.getBoundingClientRect();
+  calPts.push([(e.clientX - r.left) * calSize[0] / r.width, (e.clientY - r.top) * calSize[1] / r.height]); drawPts();
+};
+function drawPts() {
+  $('calWrap').querySelectorAll('.pt').forEach(n => n.remove());
+  const img = $('calImg'); calPts.forEach((p, i) => { const d = document.createElement('div'); d.className = 'pt'; d.textContent = i + 1; d.style.left = p[0] * img.width / calSize[0] + 'px'; d.style.top = p[1] * img.height / calSize[1] + 'px'; $('calWrap').appendChild(d); });
+}
+const parseLL = s => { const m = String(s).match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/); return m ? [+m[1], +m[2]] : null; };
+$('calApply').onclick = async () => {
+  const a = parseLL($('c1').value), b = parseLL($('c2').value);
+  if (!calSize || calPts.length < 2 || !a || !b) { $('calMsg').textContent = '이미지·클릭 2곳·좌표 2개를 모두 입력하세요.'; return; }
+  const [p1, p2] = calPts; if (Math.abs(p2[0] - p1[0]) < 20 || Math.abs(p2[1] - p1[1]) < 20) { $('calMsg').textContent = '두 지점을 가로·세로로 모두 더 멀리 떨어뜨려 주세요.'; return; }
+  const lonPx = (b[1] - a[1]) / (p2[0] - p1[0]), myPy = (mercY(b[0]) - mercY(a[0])) / (p2[1] - p1[1]);
+  const west = a[1] - p1[0] * lonPx, east = west + calSize[0] * lonPx, topY = mercY(a[0]) - p1[1] * myPy, botY = topY + calSize[1] * myPy;
+  const bounds = [[+mercInv(botY).toFixed(7), +west.toFixed(7)], [+mercInv(topY).toFixed(7), +east.toFixed(7)]];
+  localStorage.setItem('gt_map_bounds', JSON.stringify(bounds)); await idb.set('img', calBlob);
+  if (imgLayer) map.removeLayer(imgLayer); imgLayer = buildImageLayer(URL.createObjectURL(calBlob), bounds); refreshBaseOptions(); setBase('img');
+  map.fitBounds(bounds);
+  const ratio = (lonPx * 111320 * Math.cos(a[0] * Math.PI / 180)) / (-myPy * 6378137 * Math.PI / 180);
+  $('calMsg').textContent = `적용 완료 (가로/세로 축척비 ${ratio.toFixed(3)} — 1.0 에 가까울수록 정확). 이 브라우저에 저장되었습니다.`;
+  $('calOut').style.display = 'block';
+  $('calOut').textContent = `영구 반영: 캡처 파일을 map/field.jpg 로 저장하고 config.js 의 MAP_IMAGE 를 아래로 교체\nMAP_IMAGE: { url: 'map/field.jpg', bounds: ${JSON.stringify(bounds)} }`;
+};
+$('calClear').onclick = async () => { localStorage.removeItem('gt_map_bounds'); await idb.del('img'); if (imgLayer) map.removeLayer(imgLayer); imgLayer = null; refreshBaseOptions(); setBase('sat'); $('calMsg').textContent = '보정을 해제했습니다.'; $('calOut').style.display = 'none'; };
 
 /* ---------- 데모 (서버 없이 화면 미리보기) ---------- */
 function startDemo() {
