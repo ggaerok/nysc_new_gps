@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>위치 관제 · 운영자</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0f172a;--panel:#111c33;--line:#22304f;--tx:#e5ecf8;--mut:#8ea0c0;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--pri:#3b82f6}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:14px/1.4 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;background:var(--bg);color:var(--tx);display:flex;flex-direction:column;min-width:1100px}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 8px 0 0}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;background:#1e293b;color:var(--mut)}
+.pill.on{background:#14532d;color:#86efac}
+button{font:inherit;color:var(--tx);background:#1e293b;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{background:#273449}button:disabled{opacity:.4;cursor:default}
+button.pri{background:var(--pri);border-color:var(--pri)}button.bad{background:#7f1d1d;border-color:#991b1b}
+select,input,textarea{font:inherit;color:var(--tx);background:#0b1426;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.sp{flex:1}
+main{flex:1;display:flex;min-height:0}
+aside{width:340px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:12px}
+.stat{background:#0b1426;border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
+.stat b{display:block;font-size:22px}.stat span{font-size:11px;color:var(--mut)}
+.stat.ok b{color:var(--ok)}.stat.warn b{color:var(--warn)}.stat.bad b{color:var(--bad)}
+.search{padding:0 12px 8px}.search input{width:100%}
+#list{flex:1;overflow:auto;padding:0 8px 8px}
+.row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+.row:hover{background:#18253f}.row.sel{border-color:var(--pri);background:#18253f}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.ok .dot,.dot.ok{background:var(--ok)}.warn .dot,.dot.warn{background:var(--warn)}.bad .dot,.dot.bad{background:var(--bad)}.gone .dot,.dot.gone{background:#64748b}
+.row .nm{font-weight:600}.row .sub{font-size:11px;color:var(--mut);font-family:ui-monospace,Consolas,monospace}
+.row .x{margin-left:auto;padding:2px 6px;font-size:12px}
+.empty{padding:30px 16px;text-align:center;color:var(--mut)}
+#map{flex:1;min-width:0;position:relative;background:#0b1426 repeating-linear-gradient(0deg,#0000 0 39px,#16233f 39px 40px),repeating-linear-gradient(90deg,#0000 0 39px,#16233f 39px 40px)}
+.mk{display:flex;align-items:center;gap:4px;transform:translate(-9px,-9px);white-space:nowrap}
+.mk i{width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 6px #0008;flex:none}
+.mk.ok i{background:var(--ok)}.mk.warn i{background:var(--warn)}.mk.bad i{background:var(--bad)}.mk.gone i{background:#64748b}
+.mk b{background:#0f172ae6;color:#fff;font-size:12px;padding:2px 7px;border-radius:6px;border:1px solid #334155}
+.mk.anchor i{background:#a855f7;border-radius:4px}
+.leaflet-container{font:inherit}
+.mapctl{position:absolute;z-index:500;right:12px;top:12px;display:flex;flex-direction:column;gap:6px}
+.mapctl button{background:#0f172ae6}
+.banner{position:absolute;z-index:500;left:50%;transform:translateX(-50%);top:12px;background:#7c2d12;color:#fed7aa;padding:8px 14px;border-radius:10px;max-width:70%}
+.legend{position:absolute;z-index:500;left:12px;bottom:12px;background:#0f172ae6;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12px;display:flex;gap:12px}
+.legend span{display:flex;align-items:center;gap:5px}
+.modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:2000}
+.modal.show{display:flex}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:92vw;max-height:92vh;overflow:auto}
+.box h2{margin:0 0 12px;font-size:17px}
+#qrbox{background:#fff;padding:14px;border-radius:12px;display:inline-block}
+#qrbox svg,#qrbox img{display:block;width:320px;height:320px}
+.url{width:100%;font-family:ui-monospace,Consolas,monospace;font-size:11px;margin-top:10px}
+.mut{color:var(--mut);font-size:12px}
+.calwrap{position:relative;display:inline-block;cursor:crosshair;max-width:80vw;max-height:60vh;overflow:auto;border:1px solid var(--line)}
+.calwrap img{display:block;max-width:none}
+.pt{position:absolute;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:#ef4444;color:#fff;text-align:center;font-weight:700;line-height:22px;border:2px solid #fff}
+pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space:pre-wrap;word-break:break-all}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0f172a;border:1px solid var(--pri);padding:9px 16px;border-radius:10px;z-index:3000;display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>📍 위치 관제</h1>
+  <span class="pill" id="roomPill">방 닫힘</span>
+  <span class="pill" id="netPill">연결 안 됨</span>
+  <span class="pill" id="userPill" style="display:none"></span>
+  <span class="pill" id="expPill" style="display:none"></span>
+  <div class="sp"></div>
+  <label class="mut" id="durWrap">유지시간
+    <select id="dur"><option value="2">2시간</option><option value="4">4시간</option><option value="8" selected>8시간</option><option value="12">12시간</option></select>
+  </label>
+  <button class="pri" id="btnOpen">방 열기</button>
+  <button id="btnQR" disabled>QR / 링크</button>
+  <button id="btnFit">전체 보기</button>
+  <button id="btnCal">지도 보정</button>
+  <button class="bad" id="btnClose" disabled>방 종료</button>
+  <button id="btnLogout" style="display:none">로그아웃</button>
+</header>
+<main>
+  <aside>
+    <div class="stats">
+      <div class="stat"><b id="sAll">0</b><span>전체</span></div>
+      <div class="stat ok"><b id="sOk">0</b><span>정상</span></div>
+      <div class="stat warn"><b id="sWarn">0</b><span>지연</span></div>
+      <div class="stat bad"><b id="sBad">0</b><span>신호없음</span></div>
+    </div>
+    <div class="search"><input id="q" placeholder="이름 검색" autocomplete="off"></div>
+    <div id="list"><div class="empty">방을 열고 QR을 보여주면<br>참가자가 여기에 나타납니다.</div></div>
+  </aside>
+  <div id="map">
+    <div class="mapctl">
+      <select id="base"></select>
+      <button id="btnTrail">이동경로 끔</button>
+      <button id="btnOp">이미지 투명도 100%</button>
+    </div>
+    <div class="legend">
+      <span><i class="dot ok"></i>정상(75초 이내)</span><span><i class="dot warn"></i>지연</span>
+      <span><i class="dot bad"></i>신호없음</span><span><i class="dot gone"></i>퇴장</span>
+    </div>
+    <div id="banner" class="banner" style="display:none"></div>
+  </div>
+</main>
+
+<div class="modal show" id="mLogin" style="display:none"><div class="box" style="width:360px">
+  <h2>운영자 로그인</h2>
+  <input id="lgEmail" type="email" placeholder="이메일" autocomplete="username" style="width:100%">
+  <input id="lgPw" type="password" placeholder="비밀번호" autocomplete="current-password" style="width:100%;margin-top:8px">
+  <div id="lgMsg" class="mut" style="min-height:18px;margin-top:8px"></div>
+  <button class="pri" id="lgBtn" style="width:100%;margin-top:6px">로그인</button>
+  <p class="mut">허용된 운영자 계정만 방을 열고 위치를 받을 수 있습니다.</p>
+</div></div>
+<div class="modal" id="mQR"><div class="box" style="text-align:center">
+  <h2>참가자 접속 QR</h2>
+  <div id="qrbox"></div>
+  <input class="url" id="joinUrl" readonly>
+  <div style="margin-top:10px;display:flex;gap:8px;justify-content:center">
+    <button id="btnCopy">링크 복사</button><button id="btnQRClose" class="pri">닫기</button>
+  </div>
+  <p class="mut">이 주소는 방을 열 때마다 새로 만들어지며, 방을 종료하면 사용할 수 없습니다.<br>주소 안의 운영자 공개키(#뒤)는 서버로 전송되지 않습니다.</p>
+</div></div>
+
+<div class="modal" id="mCal"><div class="box" style="width:min(900px,94vw)">
+  <h2>지도 이미지 보정 (네이버 지도 캡처 ↔ 좌표 매칭)</h2>
+  <p class="mut">① 네이버 지도(북쪽이 위, 확대·축소만 한 상태)를 캡처해 불러옵니다. ② 이미지에서 위치가 확실한 지점 2곳(서로 멀리, 대각선 방향 권장)을 클릭합니다.
+  ③ 각 지점의 좌표를 구글맵에서 우클릭→좌표 복사로 가져와 붙여넣으면 이미지 전체 범위가 계산됩니다.</p>
+  <input type="file" id="calFile" accept="image/*">
+  <div style="margin:10px 0"><div class="calwrap" id="calWrap" style="display:none"><img id="calImg"></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <label>① <input id="c1" size="26" placeholder="위도, 경도 (예 34.5329, 127.4684)"></label>
+    <label>② <input id="c2" size="26" placeholder="위도, 경도"></label>
+    <button id="calApply" class="pri">적용</button><button id="calReset">초기화</button><button id="calClear">보정 해제</button><button id="calClose">닫기</button>
+  </div>
+  <p class="mut" id="calMsg"></p>
+  <pre id="calOut" style="display:none"></pre>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+(() => {
+const C = window.GT_CONFIG, $ = id => document.getElementById(id);
+const DEMO = new URLSearchParams(location.search).has('demo') || !C.SUPABASE_URL || !C.SUPABASE_ANON_KEY;  // 키 미설정 시 자동 데모
+const ONLINE_MS = 75e3, LATE_MS = 150e3;
+
+/* ---------- 지도 ---------- */
+const map = L.map('map', { zoomSnap: 0, zoomDelta: 0.5, zoomControl: true, attributionControl: true })
+  .setView([C.ANCHOR.lat, C.ANCHOR.lng], C.ANCHOR.zoom);
+map.attributionControl.setPrefix(false);
+const bases = {
+  sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 18, attribution: 'Esri' }),
+  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' })
+};
+let imgLayer = null, curBase = null;
+let imgOp = 1, hires = null, hiresOn = false;
+function syncHires() {   // 확대했을 때만 고해상도 이미지를 불러와 데이터 사용량을 아낌
+  if (!hires) return;
+  const want = curBase === imgLayer && imgLayer && map.getZoom() >= C.MAP_HIRES_MINZOOM;
+  if (want && !hiresOn) { hires.forEach(l => l.addTo(map)); hiresOn = true; }
+  else if (!want && hiresOn) { hires.forEach(l => map.removeLayer(l)); hiresOn = false; }
+  if (hiresOn) hires.forEach(l => l.setOpacity(imgOp));
+}
+map.on('zoomend', syncHires);
+function setBase(k) {
+  if (curBase) map.removeLayer(curBase);
+  if (imgLayer) map.removeLayer(imgLayer);
+  map.removeLayer(bases.sat); map.removeLayer(bases.osm);
+  if (k === 'img' && imgLayer) { bases.sat.addTo(map); imgLayer.setOpacity(imgOp); imgLayer.addTo(map); curBase = imgLayer; }   // 이미지 밖은 위성지도로 보완
+  else { curBase = bases[k] || bases.sat; curBase.addTo(map); }
+  syncHires();
+  $('base').value = k in bases || (k === 'img' && imgLayer) ? k : 'sat';
+}
+function refreshBaseOptions() {
+  const o = [];
+  if (imgLayer) o.push(['img', '지도 이미지(네이버 캡처)']);
+  o.push(['sat', '위성(Esri)'], ['osm', '일반(OSM)']);
+  $('base').innerHTML = o.map(a => `<option value="${a[0]}">${a[1]}</option>`).join('');
+}
+$('base').onchange = e => setBase(e.target.value);
+
+function buildImageLayer(url, b) { return L.imageOverlay(url, b, { opacity: 1, interactive: false }); }
+/* IndexedDB: 보정된 이미지는 이 브라우저에만 저장(서버 전송 없음) */
+const idb = {
+  open: () => new Promise((res, rej) => { const r = indexedDB.open('gt', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = rej; }),
+  async get(k) { const d = await this.open(); return new Promise(r => { const q = d.transaction('k').objectStore('k').get(k); q.onsuccess = () => r(q.result); q.onerror = () => r(null); }); },
+  async set(k, v) { const d = await this.open(); return new Promise(r => { const t = d.transaction('k', 'readwrite'); t.objectStore('k').put(v, k); t.oncomplete = r; }); },
+  async del(k) { const d = await this.open(); return new Promise(r => { const t = d.transaction('k', 'readwrite'); t.objectStore('k').delete(k); t.oncomplete = r; }); }
+};
+(async () => {
+  let cfg = C.MAP_IMAGE;
+  try {
+    const loc = JSON.parse(localStorage.getItem('gt_map_bounds') || 'null'), blob = await idb.get('img');
+    if (loc && blob) cfg = { url: URL.createObjectURL(blob), bounds: loc };
+  } catch (e) {}
+  if (cfg && cfg.url && cfg.bounds) imgLayer = buildImageLayer(cfg.url, cfg.bounds);
+  if (cfg === C.MAP_IMAGE && C.MAP_HIRES) hires = C.MAP_HIRES.map(t => buildImageLayer(t.url, t.bounds));
+  refreshBaseOptions(); setBase(imgLayer ? 'img' : 'sat');
+  if (imgLayer) map.setView(imgLayer.getBounds().getCenter(), C.ANCHOR.zoom);
+})();
+
+L.marker([C.ANCHOR.lat, C.ANCHOR.lng], { icon: L.divIcon({ className: '', html: '<div class="mk anchor"><i></i><b>기준점</b></div>', iconSize: [0, 0] }), interactive: false, zIndexOffset: -500 }).addTo(map);
+
+/* ---------- 상태 ---------- */
+const P = new Map();          // id -> participant (메모리에만 존재)
+let room = null;              // {id,pub,priv,exp,url}
+let ch = null, sb = null, userEmail = '', selId = null, showTrail = false, demoTimer = null, expTimer = null;
+const keyCache = new Map();
+const layers = new Map();
+
+const stat = p => p.gone ? 'gone' : (Date.now() - p.rx < ONLINE_MS ? 'ok' : Date.now() - p.rx < LATE_MS ? 'warn' : 'bad');
+const toast = t => { const e = $('toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => e.style.display = 'none', 2600); };
+
+function ensureLayer(p) {
+  let l = layers.get(p.id);
+  if (!l) {
+    l = { m: L.marker([p.la, p.lo], { icon: L.divIcon({ className: '', iconSize: [0, 0] }) }).addTo(map), c: L.circle([p.la, p.lo], { radius: 1, weight: 1, color: '#3b82f6', fillOpacity: .08 }).addTo(map), t: L.polyline([], { color: '#60a5fa', weight: 3, opacity: .7 }) };
+    l.m.on('click', () => select(p.id)); layers.set(p.id, l);
+  }
+  return l;
+}
+function paintMap(p) {
+  const l = ensureLayer(p), s = stat(p);
+  if (p.gone) { map.removeLayer(l.m); map.removeLayer(l.c); map.removeLayer(l.t); return; }
+  l.m.setLatLng([p.la, p.lo]).setIcon(L.divIcon({ className: '', iconSize: [0, 0], html: `<div class="mk ${s}"><i></i><b>${GT.esc(p.n)}</b></div>` }));
+  l.c.setLatLng([p.la, p.lo]).setRadius(Math.min(Math.max(p.ac || 0, 1), 300));
+  l.c.setStyle({ color: s === 'ok' ? '#22c55e' : s === 'warn' ? '#f59e0b' : '#ef4444' });
+  if (showTrail) { l.t.setLatLngs(p.trail); if (!map.hasLayer(l.t)) l.t.addTo(map); } else map.removeLayer(l.t);
+}
+let rq = 0; const schedule = () => { if (!rq) rq = requestAnimationFrame(() => { rq = 0; render(); }); };
+
+function render() {
+  let ok = 0, warn = 0, bad = 0;
+  const q = $('q').value.trim().toLowerCase(), rows = [];
+  [...P.values()].sort((a, b) => a.n.localeCompare(b.n, 'ko')).forEach(p => {
+    const s = stat(p); if (s === 'ok') ok++; else if (s === 'warn') warn++; else if (s === 'bad') bad++;
+    if (p.hasPos) paintMap(p);
+    if (q && !p.n.toLowerCase().includes(q)) return;
+    const age = Math.round((Date.now() - p.rx) / 1000);
+    rows.push(`<div class="row ${s} ${p.id === selId ? 'sel' : ''}" data-id="${p.id}"><i class="dot"></i><div><div class="nm">${GT.esc(p.n)}</div>
+      <div class="sub">${p.gone ? '퇴장함' : !p.hasPos ? '위치 수신 대기 중…' : GT.dmsLat(p.la).text + '<br>' + GT.dmsLng(p.lo).text}</div>
+      <div class="sub">${p.gone || !p.hasPos ? '' : (age < 90 ? age + '초 전' : Math.round(age / 60) + '분 전') + ' · 정확도 ±' + Math.round(p.ac || 0) + 'm'}</div></div></div>`);
+  });
+  $('sAll').textContent = P.size; $('sOk').textContent = ok; $('sWarn').textContent = warn; $('sBad').textContent = bad;
+  $('list').innerHTML = rows.join('') || `<div class="empty">${P.size ? '검색 결과 없음' : '방을 열고 QR을 보여주면<br>참가자가 여기에 나타납니다.'}</div>`;
+}
+$('list').onclick = e => {
+  const r = e.target.closest('.row'); if (r) select(r.dataset.id, true);
+};
+$('q').oninput = schedule;
+function select(id, fly) {
+  selId = id; const p = P.get(id); schedule();
+  if (p && fly && !p.gone) map.flyTo([p.la, p.lo], Math.max(map.getZoom(), 18), { duration: .6 });
+}
+$('btnFit').onclick = () => {
+  const pts = [...P.values()].filter(p => !p.gone).map(p => [p.la, p.lo]);
+  pts.push([C.ANCHOR.lat, C.ANCHOR.lng]);
+  map.fitBounds(pts, { padding: [60, 60], maxZoom: 19 });
+};
+$('btnOp').onclick = () => { imgOp = imgOp === 1 ? .6 : imgOp === .6 ? .3 : 1; $('btnOp').textContent = '이미지 투명도 ' + Math.round(imgOp * 100) + '%'; if (imgLayer) imgLayer.setOpacity(imgOp); syncHires(); };
+$('btnTrail').onclick = () => { showTrail = !showTrail; $('btnTrail').textContent = '이동경로 ' + (showTrail ? '켬' : '끔'); schedule(); };
+setInterval(schedule, 5000);
+
+/* ---------- 수신 처리 ---------- */
+async function onMsg(payload) {
+  if (!room || !payload || !payload.pk || !payload.d) return;
+  let key = keyCache.get(payload.pk);
+  try {
+    if (!key) { if (payload.pk.length > 100) return; key = await GT.deriveAes(room.priv, payload.pk); keyCache.size < 1000 && keyCache.set(payload.pk, key); }
+    const m = await GT.open(key, payload.d);
+    handle(payload.pk.slice(-8), m);
+  } catch (e) { /* 복호화 실패 = 키가 다른 외부 메시지 → 무시 */ }
+}
+function handle(id, m) {
+  if (m.t === 'b') { const p = P.get(id); if (p) { p.gone = true; schedule(); } return; }
+  if (!P.has(id) && P.size >= C.MAX_PARTICIPANTS) return;
+  let p = P.get(id);
+  if (!p) { p = { id, n: '참가자', la: 0, lo: 0, ac: 0, rx: 0, ts: 0, trail: [], gone: false, hasPos: false }; P.set(id, p); }
+  if (typeof m.n === 'string') p.n = m.n.slice(0, 12) || '참가자';
+  p.gone = false;
+  if (m.t === 'p') {
+    if (!GT.validPos(m.la, m.lo) || (m.ts && m.ts < p.ts)) return;
+    p.la = m.la; p.lo = m.lo; p.ac = +m.ac || 0; p.ts = m.ts || 0; p.rx = Date.now(); p.hasPos = true;
+    p.trail.push([m.la, m.lo]); if (p.trail.length > 120) p.trail.shift();
+  } else if (!p.hasPos) { p.rx = Date.now(); schedule(); return; }
+  schedule();
+}
+/* ---------- 방 열기 / 닫기 ---------- */
+$('btnOpen').onclick = async () => {
+    $('btnOpen').disabled = true;
+  const kp = await GT.newKeyPair();
+  const id = GT.b64u(GT.rand(16)), exp = Date.now() + (+$('dur').value) * 3600e3;
+  const hash = new URLSearchParams({ r: id, o: kp.pub, e: exp.toString(36) }).toString();
+  const base = location.href.replace(/[^/]*$/, '').replace(/\?.*$/, '');
+  room = { id, pub: kp.pub, priv: kp.priv, exp, url: base + 'join.html' + (DEMO ? '?demo=1' : '') + '#' + hash };
+  P.clear(); layers.forEach(l => { map.removeLayer(l.m); map.removeLayer(l.c); map.removeLayer(l.t); }); layers.clear(); keyCache.clear(); selId = null;
+  if (DEMO) { startDemo(); setNet('데모 모드', true); }
+  else {
+    const ss = (await sb.auth.getSession()).data.session;
+    if (!ss) { location.reload(); return; }
+    await sb.realtime.setAuth(ss.access_token);
+    ch = sb.channel('loc:' + id, { config: { private: true, broadcast: { self: false, ack: false } } });   // 비공개 채널: 허용된 운영자만 수신
+    ch.on('broadcast', { event: 'm' }, ({ payload }) => onMsg(payload)).subscribe(s => {
+      if (s === 'SUBSCRIBED') setNet('연결됨', true); else if (s === 'CHANNEL_ERROR' || s === 'TIMED_OUT') setNet('연결 오류', false); else if (s === 'CLOSED') setNet('연결 안 됨', false);
+    });
+  }
+  expTimer = setInterval(tickExp, 1000);
+  $('roomPill').textContent = '방 열림'; $('roomPill').classList.add('on');
+  ['btnQR', 'btnClose'].forEach(b => $(b).disabled = false); $('durWrap').style.display = 'none';
+  showQR(); render();
+};
+function setNet(t, on) { $('netPill').textContent = t; $('netPill').classList.toggle('on', on); }
+function tickExp() {
+  if (!room) return; const left = room.exp - Date.now();
+  if (left <= 0) { closeRoom(true); return; }
+  const h = Math.floor(left / 3600e3), m = Math.floor(left % 3600e3 / 60e3);
+  $('expPill').style.display = ''; $('expPill').textContent = `자동 종료까지 ${h}시간 ${m}분`;
+}
+async function closeRoom(auto) {
+  if (!room) return;
+  if (!auto && !confirm('방을 종료할까요?\n\n· 이후 참가자가 보내는 위치는 아무에게도 전달되지 않습니다.\n· 화면의 모든 위치 정보는 즉시 삭제되며 서버에는 남지 않습니다.')) return;
+  clearInterval(expTimer); clearInterval(demoTimer);
+  if (ch) { try { await sb.removeChannel(ch); } catch (e) {} }   // 구독 해제 = 이후 도착하는 위치는 아무도 받지 않음
+  ch = null; room = null; P.clear(); keyCache.clear(); selId = null;
+  layers.forEach(l => { map.removeLayer(l.m); map.removeLayer(l.c); map.removeLayer(l.t); }); layers.clear();
+  $('roomPill').textContent = '방 닫힘'; $('roomPill').classList.remove('on'); setNet('연결 안 됨', false); $('expPill').style.display = 'none';
+  ['btnQR', 'btnClose'].forEach(b => $(b).disabled = true); $('btnOpen').disabled = false; $('durWrap').style.display = '';
+  closeModals(); render(); toast(auto ? '유지시간이 끝나 방이 종료되었습니다' : '방이 종료되고 위치 정보가 삭제되었습니다');
+}
+$('btnClose').onclick = () => closeRoom(false);
+addEventListener('beforeunload', e => { if (room) { e.preventDefault(); e.returnValue = ''; } });
+
+/* ---------- QR / 공지 ---------- */
+function showQR() {
+  const qr = qrcode(0, 'M'); qr.addData(room.url); qr.make();
+  $('qrbox').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  $('joinUrl').value = room.url; $('mQR').classList.add('show');
+}
+$('btnQR').onclick = showQR;
+$('btnQRClose').onclick = closeModals;
+$('btnCopy').onclick = async () => { try { await navigator.clipboard.writeText(room.url); toast('링크를 복사했습니다'); } catch (e) { $('joinUrl').select(); } };
+function closeModals() { document.querySelectorAll('.modal').forEach(m => m.classList.remove('show')); }
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('mousedown', e => { if (e.target === m && m.id !== 'mCal' && m.id !== 'mLogin') closeModals(); }));
+function showBanner(t, ms) { const b = $('banner'); b.textContent = t; b.style.display = 'block'; clearTimeout(showBanner.t); showBanner.t = setTimeout(() => b.style.display = 'none', ms || 7000); }
+
+/* ---------- 지도 보정 ---------- */
+let calPts = [], calSize = null, calBlob = null;
+const mercY = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+const mercInv = y => (2 * Math.atan(Math.exp(y)) - Math.PI / 2) * 180 / Math.PI;
+$('btnCal').onclick = () => { $('mCal').classList.add('show'); };
+$('calClose').onclick = closeModals;
+$('calReset').onclick = () => { calPts = []; drawPts(); $('calMsg').textContent = ''; };
+$('calFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return; calBlob = f;
+  const img = $('calImg'); img.onload = () => { calSize = [img.naturalWidth, img.naturalHeight]; $('calWrap').style.display = 'inline-block'; calPts = []; drawPts(); $('calMsg').textContent = `이미지 ${calSize[0]}×${calSize[1]} — 기준 지점 2곳을 클릭하세요.`; };
+  img.src = URL.createObjectURL(f);
+};
+$('calImg').onclick = e => {
+  if (calPts.length >= 2) return; const r = e.target.getBoundingClientRect();
+  calPts.push([(e.clientX - r.left) * calSize[0] / r.width, (e.clientY - r.top) * calSize[1] / r.height]); drawPts();
+};
+function drawPts() {
+  $('calWrap').querySelectorAll('.pt').forEach(n => n.remove());
+  const img = $('calImg'); calPts.forEach((p, i) => { const d = document.createElement('div'); d.className = 'pt'; d.textContent = i + 1; d.style.left = p[0] * img.width / calSize[0] + 'px'; d.style.top = p[1] * img.height / calSize[1] + 'px'; $('calWrap').appendChild(d); });
+}
+const parseLL = s => { const m = String(s).match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/); return m ? [+m[1], +m[2]] : null; };
+$('calApply').onclick = async () => {
+  const a = parseLL($('c1').value), b = parseLL($('c2').value);
+  if (!calSize || calPts.length < 2 || !a || !b) { $('calMsg').textContent = '이미지·클릭 2곳·좌표 2개를 모두 입력하세요.'; return; }
+  const [p1, p2] = calPts; if (Math.abs(p2[0] - p1[0]) < 20 || Math.abs(p2[1] - p1[1]) < 20) { $('calMsg').textContent = '두 지점을 가로·세로로 모두 더 멀리 떨어뜨려 주세요.'; return; }
+  const lonPx = (b[1] - a[1]) / (p2[0] - p1[0]), myPy = (mercY(b[0]) - mercY(a[0])) / (p2[1] - p1[1]);
+  const west = a[1] - p1[0] * lonPx, east = west + calSize[0] * lonPx, topY = mercY(a[0]) - p1[1] * myPy, botY = topY + calSize[1] * myPy;
+  const bounds = [[+mercInv(botY).toFixed(7), +west.toFixed(7)], [+mercInv(topY).toFixed(7), +east.toFixed(7)]];
+  localStorage.setItem('gt_map_bounds', JSON.stringify(bounds)); await idb.set('img', calBlob);
+  if (imgLayer) map.removeLayer(imgLayer); imgLayer = buildImageLayer(URL.createObjectURL(calBlob), bounds); refreshBaseOptions(); setBase('img');
+  map.fitBounds(bounds);
+  const ratio = (lonPx * 111320 * Math.cos(a[0] * Math.PI / 180)) / (-myPy * 6378137 * Math.PI / 180);
+  $('calMsg').textContent = `적용 완료 (가로/세로 축척비 ${ratio.toFixed(3)} — 1.0 에 가까울수록 정확). 이 브라우저에 저장되었습니다.`;
+  $('calOut').style.display = 'block';
+  $('calOut').textContent = `영구 반영: 캡처 파일을 map/field.jpg 로 저장하고 config.js 의 MAP_IMAGE 를 아래로 교체\nMAP_IMAGE: { url: 'map/field.jpg', bounds: ${JSON.stringify(bounds)} }`;
+};
+$('calClear').onclick = async () => { localStorage.removeItem('gt_map_bounds'); await idb.del('img'); if (imgLayer) map.removeLayer(imgLayer); imgLayer = null; refreshBaseOptions(); setBase('sat'); $('calMsg').textContent = '보정을 해제했습니다.'; $('calOut').style.display = 'none'; };
+
+/* ---------- 데모 (서버 없이 화면 미리보기) ---------- */
+function startDemo() {
+  const names = ['김민수', '이서연', '박지훈', '최유진', '정하늘', '강도윤', '조예린', '윤재호', '한소희', '오태양'];
+  const sim = names.map((n, i) => ({ id: 'demo' + i, n, la: C.ANCHOR.lat + (Math.random() - .5) * .0035, lo: C.ANCHOR.lng + (Math.random() - .5) * .005, a: Math.random() * 6.28 }));
+  const tick = () => sim.forEach((s, i) => {
+    if (i === 8 && Date.now() % 60000 > 20000) return;           // 일부는 신호 끊김 흉내
+    s.a += (Math.random() - .5) * .8; s.la += Math.sin(s.a) * .00004; s.lo += Math.cos(s.a) * .00005;
+    handle(s.id, { t: 'p', n: s.n, la: s.la, lo: s.lo, ac: 4 + Math.random() * 12, ts: Date.now() });
+  });
+  tick(); demoTimer = setInterval(tick, 5000);
+}
+if (DEMO) { document.title += ' (데모)'; $('netPill').textContent = '데모 모드'; showBanner('데모 모드: 가상 참가자로 화면을 미리 봅니다 (config.js 에 Supabase 키를 넣으면 실제 모드)'); }
+/* ---------- 운영자 로그인 (Supabase Auth, 허용 목록 계정만) ---------- */
+async function verifyOperator() {
+  const { data } = await sb.auth.getSession(); if (!data.session) return false;
+  const r = await sb.rpc('is_gps_operator');
+  if (r.error || r.data !== true) { await sb.auth.signOut(); return false; }
+  userEmail = data.session.user.email || ''; return true;
+}
+function onLoggedIn() {
+  $('mLogin').style.display = 'none'; $('mLogin').classList.remove('show');
+  $('userPill').textContent = userEmail; $('userPill').style.display = ''; $('btnLogout').style.display = ''; $('btnOpen').disabled = false;
+}
+async function doLogin() {
+  $('lgMsg').textContent = '확인 중…'; $('lgBtn').disabled = true;
+  const r = await sb.auth.signInWithPassword({ email: $('lgEmail').value.trim(), password: $('lgPw').value });
+  if (r.error) { $('lgMsg').textContent = '이메일 또는 비밀번호가 올바르지 않습니다.'; $('lgBtn').disabled = false; return; }
+  if (!await verifyOperator()) { $('lgMsg').textContent = '운영자 권한이 없는 계정입니다.'; $('lgBtn').disabled = false; return; }
+  $('lgPw').value = ''; $('lgBtn').disabled = false; onLoggedIn();
+}
+$('lgBtn').onclick = doLogin; $('lgPw').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+$('btnLogout').onclick = async () => {
+  if (room && !confirm('방이 열려 있습니다. 로그아웃하면 방이 종료됩니다. 계속할까요?')) return;
+  if (room) await closeRoom(true);
+  await sb.auth.signOut(); location.reload();
+};
+if (!DEMO) {
+  sb = supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true }, realtime: { params: { eventsPerSecond: 20 } } });
+  $('btnOpen').disabled = true; $('mLogin').style.display = 'flex'; $('mLogin').classList.add('show');
+  verifyOperator().then(ok => { if (ok) onLoggedIn(); else $('lgEmail').focus(); });
+}
+render();
+})();
+</script>
+</body>
+</html>

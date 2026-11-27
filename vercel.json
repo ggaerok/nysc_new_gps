@@ -1,0 +1,17 @@
+{
+  "headers": [
+    {
+      "source": "/(.*)\\.(js|jpg|png|css)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400, s-maxage=86400" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Permissions-Policy", "value": "geolocation=(self)" }
+      ]
+    }
+  ]
+}
