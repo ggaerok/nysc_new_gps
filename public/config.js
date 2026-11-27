@@ -1,11 +1,7 @@
 /* ===== 설정 파일 (이 파일만 수정하면 됩니다) ===== */
 window.GT_CONFIG = {
-  // Supabase 프로젝트 > Settings > API 에서 확인 (anon/publishable 키는 공개되어도 되는 키입니다)
-  SUPABASE_URL: 'https://frtkscwrzixkojsokpae.supabase.co',
-  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZydGtzY3dyeml4a29qc29rcGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU3MjMzMTIsImV4cCI6MjExMTI5OTMxMn0.Z454not-OoJleLlaPJcanE61owMsa2nkCU04YH5_qPE',
-
-  SEND_INTERVAL_MS: 5000,    // 참가자 위치 전송 주기 (5초)
-  MAX_PARTICIPANTS: 300,     // 운영자 화면이 받아주는 최대 인원(남용 방지)
+  // 실시간 중계는 같은 도메인의 /ws/<방ID> (Cloudflare Worker 또는 server.js). 별도 키 불필요.
+  // WS_BASE: 'wss://다른도메인'  ← 중계 서버를 다른 주소에 둘 때만 지정
 
   // 지도 기준점: 국립청소년우주센터 핀 = 네이버 캡처의 픽셀(473,465)
   // 네이버 지도 링크의 확대 수준 17.24 를 그대로 사용

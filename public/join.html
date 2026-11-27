@@ -42,10 +42,10 @@ ul{margin:8px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
     <h1>📍 위치 공유 참여</h1>
     <div class="card" style="margin-top:12px">
       <h2 style="margin:0 0 8px;font-size:18px">위치정보 제공 동의</h2>
-      <p style="margin:0 0 6px">운영자에게 내 <b>현재 위치(GPS)</b>를 <b>5초마다</b> 전송합니다.</p>
+      <p style="margin:0 0 6px">운영자에게 내 <b>현재 위치(GPS)</b>를 <b>1초마다</b> 전송합니다.</p>
       <ul>
         <li>이 페이지를 연 동안에만 공유되며, 언제든 종료할 수 있습니다.</li>
-        <li>위치는 암호화되어 운영자에게만 전달되고 서버에 저장되지 않습니다.</li>
+        <li>전송 구간은 암호화(HTTPS/WSS)되며, 위치는 중계 서버 메모리에서 운영자에게 전달만 하고 저장하지 않습니다.</li>
         <li>화면을 켜 둔 상태에서 정확하게 전송됩니다.</li>
       </ul>
       <div class="sep"></div>
@@ -81,39 +81,37 @@ ul{margin:8px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
 <script src="config.js"></script>
 <script src="common.js"></script>
 <script>
-/* 참가자는 '보내기만' 합니다: 채널 구독/웹소켓 없이 HTTP 1회 전송 (수신 egress 0) */
-(async () => {
+/* 화면: GPS 를 도·분·초로 실시간 표시. 전송: 화면에 보이는 숫자만 골라 서버가 정한 주기(기본 1초)로 전송. 받는 데이터는 설정/종료 신호뿐. */
+(() => {
 const C = window.GT_CONFIG, $ = id => document.getElementById(id), S = sessionStorage;
 const DEMO = new URLSearchParams(location.search).has('demo');
 const show = v => { ['vMsg', 'vConsent', 'vMain'].forEach(x => { $(x).classList.add('hide'); $(x).style.display = ''; }); const e = $(v); e.classList.remove('hide'); if (v === 'vMain') e.style.display = 'flex'; };
 const msg = (icon, t, d, btn) => { show('vMsg'); $('msgIcon').textContent = icon; $('msgT').textContent = t; $('msgD').textContent = d; const b = $('msgBtn'); if (btn) { b.textContent = btn.t; b.onclick = btn.f; b.classList.remove('hide'); } else b.classList.add('hide'); };
 function confirmBox(t, d) { return new Promise(r => { $('ovT').textContent = t; $('ovD').textContent = d; $('ov').classList.add('show'); $('ovNo').onclick = () => { $('ov').classList.remove('show'); r(false); }; $('ovYes').onclick = () => { $('ov').classList.remove('show'); r(true); }; }); }
 
-/* ---- 링크 파싱 (해시는 서버로 전송되지 않음) ---- */
+/* ---- 링크 (#해시는 서버로 전송되지 않음) ---- */
 let J = null;
 try { J = JSON.parse(S.getItem('gt_join') || 'null'); } catch (e) {}
 if (location.hash.length > 10) {
   const h = new URLSearchParams(location.hash.slice(1));
-  J = { r: h.get('r'), o: h.get('o'), e: parseInt(h.get('e') || '0', 36) };
-  S.setItem('gt_join', JSON.stringify(J)); S.removeItem('gt_consent');
+  J = { r: h.get('r') }; S.setItem('gt_join', JSON.stringify(J)); S.removeItem('gt_consent');
   history.replaceState(null, '', location.pathname + location.search);
 }
-if (!J || !J.r || !J.o) return msg('🔗', '접속 링크가 올바르지 않습니다', '운영자가 보여주는 QR 코드를 다시 스캔해 주세요.');
-if (J.e && Date.now() > J.e) { S.clear(); return msg('⌛', '종료된 방입니다', '운영자에게 새 QR 코드를 요청해 주세요.'); }
-if (!DEMO && (!C.SUPABASE_URL || !C.SUPABASE_ANON_KEY)) return msg('⚙️', '서비스 설정 전입니다', '운영자에게 문의해 주세요.');
+if (!J || !J.r || !/^[A-Za-z0-9_-]{16,32}$/.test(J.r)) return msg('🔗', '접속 링크가 올바르지 않습니다', '운영자가 보여주는 QR 코드를 다시 스캔해 주세요.');
 if (!navigator.geolocation) return msg('📵', '위치 기능을 사용할 수 없습니다', '다른 브라우저(Chrome, Safari)에서 열어 주세요.');
-
+let pid = S.getItem('gt_pid'); if (!pid) { pid = GT.rid(12); S.setItem('gt_pid', pid); }
 $('name').value = S.getItem('gt_name') || '';
-let me = null, aes = null, timer = null, wake = null, ended = false, fixing = false;
+
+let ws = null, timer = null, wake = null, watchId = null, ended = false, iv = 1000, last = null, retry = 0, sentN = 0, rt = null;
 
 function leavePage() {
-  S.clear(); ended = true; clearInterval(timer);
+  S.clear(); ended = true; clearInterval(timer); clearTimeout(rt); if (watchId != null) navigator.geolocation.clearWatch(watchId);
+  try { if (wake) wake.release(); } catch (e) {}
   msg('👋', '접속이 종료되었습니다', '위치 정보는 더 이상 전송되지 않습니다. 이 창을 닫아도 됩니다.');
   try { window.close(); } catch (e) {}
   setTimeout(() => { if (!document.hidden) { try { location.replace('about:blank'); } catch (e) {} } }, 1500);
 }
 
-/* ---- 동의 ---- */
 if (S.getItem('gt_consent') === '1') start(); else show('vConsent');
 $('bDecline').onclick = async () => {
   if (await confirmBox('접속을 종료할까요?', '위치 공유에 동의하지 않으면 이 페이지에서 나가며, 위치 정보는 전혀 수집·전송되지 않습니다.')) leavePage();
@@ -123,65 +121,66 @@ $('bAgree').onclick = () => { S.setItem('gt_consent', '1'); S.setItem('gt_name',
 /* ---- 시작 ---- */
 async function start() {
   show('vMain');
-  try {
-    let jwk = null; try { jwk = JSON.parse(S.getItem('gt_priv') || 'null'); } catch (e) {}
-    if (jwk && jwk.pub) me = { priv: await GT.importPriv(jwk.k), pub: jwk.pub };
-    else { me = await GT.newKeyPair(); S.setItem('gt_priv', JSON.stringify({ k: await GT.exportPriv(me.priv), pub: me.pub })); }
-    aes = await GT.deriveAes(me.priv, J.o);
-  } catch (e) { return msg('⚠️', '보안 설정에 실패했습니다', '링크가 손상되었을 수 있습니다. QR을 다시 스캔해 주세요.'); }
-  await fix();
-  timer = setInterval(fix, C.SEND_INTERVAL_MS);
+  watch();
+  if (!DEMO) connect();
+  timer = setInterval(tick, iv);
   try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
   document.addEventListener('visibilitychange', async () => {
     if (document.hidden || ended) return;
     try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
-    fix();
+    if (!DEMO && (!ws || ws.readyState > 1)) connect();
   });
 }
 
-/* ---- GPS ---- */
+/* ---- GPS: 실시간 표시 ---- */
 let demoLa = C.ANCHOR.lat + 0.0004, demoLo = C.ANCHOR.lng - 0.0006;
-function getPos() {
-  if (DEMO) { demoLa += (Math.random() - .5) * .00006; demoLo += (Math.random() - .5) * .00006; return Promise.resolve({ coords: { latitude: demoLa, longitude: demoLo, accuracy: 6 + Math.random() * 6 } }); }
-  return new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }));
+function onFix(c) {
+  const la = GT.dmsLat(c.latitude), lo = GT.dmsLng(c.longitude);
+  last = { la, lo, ac: Math.round(c.accuracy || 0), at: Date.now() };
+  $('lat').textContent = la.text; $('lng').textContent = lo.text;
+  $('dec').textContent = `${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}`;
+  $('acc').textContent = `정확도 ±${last.ac}m`;
 }
-async function fix() {
-  if (ended || fixing) return; fixing = true;
-  try {
-    const c = (await getPos()).coords;
-    $('lat').textContent = GT.dmsLat(c.latitude).text; $('lng').textContent = GT.dmsLng(c.longitude).text;
-    $('dec').textContent = `${c.latitude.toFixed(6)}, ${c.longitude.toFixed(6)}`;
-    $('acc').textContent = `정확도 ±${Math.round(c.accuracy)}m`;
-    const ok = await send('p', { la: +c.latitude.toFixed(6), lo: +c.longitude.toFixed(6), ac: Math.round(c.accuracy) });
-    $('sent').textContent = (ok ? '전송 ' : '전송 실패 ') + GT.fmtTime(Date.now());
-  } catch (e) {
+function watch() {
+  if (DEMO) { setInterval(() => { demoLa += (Math.random() - .5) * .00006; demoLo += (Math.random() - .5) * .00006; onFix({ latitude: demoLa, longitude: demoLo, accuracy: 6 + Math.random() * 6 }); }, 1000); return; }
+  watchId = navigator.geolocation.watchPosition(p => onFix(p.coords), e => {
     if (e && e.code === 1) { clearInterval(timer); return msg('🚫', '위치 권한이 거부되었습니다', '브라우저(또는 휴대폰) 설정에서 이 사이트의 위치 권한을 허용한 뒤 다시 시도해 주세요.', { t: '다시 시도', f: () => location.reload() }); }
-    $('acc').textContent = '위치를 찾는 중… (실외에서 더 정확합니다)'; setTimeout(fix, 5000);
-  } finally { fixing = false; }
-  if (J.e && Date.now() > J.e) { ended = true; clearInterval(timer); S.clear(); msg('🏁', '유지 시간이 끝났습니다', '위치 공유가 중지되었습니다.'); }
+    $('acc').textContent = '위치를 찾는 중… (실외에서 더 정확합니다)';
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
 }
 
-/* ---- 전송 전용: Supabase Realtime REST broadcast (구독 없음) ---- */
-async function send(t, extra) {
-  if (DEMO) return true;
-  try {
-    const nm = S.getItem('gt_name') || ('참가자-' + me.pub.slice(-3));
-    const d = await GT.seal(aes, { t, n: nm, ts: Date.now(), ...extra });
-    const r = await fetch(C.SUPABASE_URL + '/realtime/v1/api/broadcast', {
-      method: 'POST', keepalive: true,
-      headers: { 'Content-Type': 'application/json', apikey: C.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + C.SUPABASE_ANON_KEY },
-      body: JSON.stringify({ messages: [{ topic: 'loc:' + J.r, event: 'm', payload: { pk: me.pub, d }, private: true }] })
-    });
-    return r.ok;
-  } catch (e) { return false; }
+/* ---- 전송: 숫자 9개만 (h, 위도 도·분·초, 경도 도·분·초, 정확도, 측정 경과 초) ---- */
+function tick() {
+  if (ended || !last) return;
+  const age = Math.min(Math.round((Date.now() - last.at) / 1000), 9999), a = last.la, o = last.lo;
+  const arr = [(a.neg ? 1 : 0) + (o.neg ? 2 : 0), a.d, a.m, a.s, o.d, o.m, o.s, last.ac, age];
+  if (DEMO) { sentN++; $('sent').textContent = '전송(데모) ' + GT.fmtTime(Date.now()); return; }
+  if (ws && ws.readyState === 1) { ws.send(JSON.stringify(arr)); sentN++; $('sent').textContent = '전송 ' + GT.fmtTime(Date.now()); }
+  else $('sent').textContent = '서버 연결 중…';
 }
+function setIv(v) { if (v === iv) return; iv = v; clearInterval(timer); timer = setInterval(tick, iv); }
+function connect() {
+  if (ended) return; clearTimeout(rt);
+  try { ws = new WebSocket(GT.wsUrl(J.r, 'p')); } catch (e) { return again(); }
+  ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ t: 'hi', id: pid, n: S.getItem('gt_name') || '' })); };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m.t === 'cfg' && [1000, 2000, 5000].includes(m.iv)) setIv(m.iv);
+    else if (m.t === 'end') {
+      ended = true; clearInterval(timer); S.clear(); if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      try { if (wake) wake.release(); } catch (x) {}
+      msg(m.why === 'nr' ? '🚪' : '🏁', m.why === 'nr' ? '열려 있는 방이 아닙니다' : m.why === 'full' ? '인원이 가득 찼습니다' : '운영자가 방을 종료했습니다', '위치 공유가 중지되었습니다. 필요하면 운영자에게 새 QR 코드를 요청해 주세요.');
+    }
+  };
+  ws.onclose = () => again();
+  ws.onerror = () => { try { ws.close(); } catch (e) {} };
+}
+function again() { if (ended) return; retry++; rt = setTimeout(connect, Math.min(500 * retry, 5000)); }
 
 $('bLeave').onclick = async () => {
   if (!await confirmBox('위치 공유를 종료할까요?', '종료하면 내 위치가 더 이상 운영자에게 전송되지 않습니다.')) return;
-  clearInterval(timer); ended = true;
-  await send('b');
-  try { if (wake) wake.release(); } catch (e) {}
-  leavePage();
+  try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'bye' })); } catch (e) {}
+  setTimeout(leavePage, 150);
 };
 })();
 </script>
