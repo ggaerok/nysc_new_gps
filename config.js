@@ -4,7 +4,7 @@ window.GT_CONFIG = {
   SUPABASE_URL: 'https://frtkscwrzixkojsokpae.supabase.co',
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZydGtzY3dyeml4a29qc29rcGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU3MjMzMTIsImV4cCI6MjExMTI5OTMxMn0.Z454not-OoJleLlaPJcanE61owMsa2nkCU04YH5_qPE',
 
-  SEND_INTERVAL_MS: 30000,   // 참가자 위치 전송 주기 (30초)
+  SEND_INTERVAL_MS: 5000,    // 참가자 위치 전송 주기 (5초)
   MAX_PARTICIPANTS: 300,     // 운영자 화면이 받아주는 최대 인원(남용 방지)
 
   // 지도 기준점: 국립청소년우주센터 핀 = 네이버 캡처의 픽셀(473,465)

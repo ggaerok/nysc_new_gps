@@ -97,7 +97,7 @@ pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space
       <button id="btnOp">이미지 투명도 100%</button>
     </div>
     <div class="legend">
-      <span><i class="dot ok"></i>정상(75초 이내)</span><span><i class="dot warn"></i>지연</span>
+      <span><i class="dot ok"></i>정상(20초 이내)</span><span><i class="dot warn"></i>지연</span>
       <span><i class="dot bad"></i>신호없음</span><span><i class="dot gone"></i>퇴장</span>
     </div>
     <div id="banner" class="banner" style="display:none"></div>
@@ -147,7 +147,7 @@ pre{background:#0b1426;padding:10px;border-radius:8px;font-size:11px;white-space
 (() => {
 const C = window.GT_CONFIG, $ = id => document.getElementById(id);
 const DEMO = new URLSearchParams(location.search).has('demo') || !C.SUPABASE_URL || !C.SUPABASE_ANON_KEY;  // 키 미설정 시 자동 데모
-const ONLINE_MS = 75e3, LATE_MS = 150e3;
+const ONLINE_MS = 20e3, LATE_MS = 45e3;
 
 /* ---------- 지도 ---------- */
 const map = L.map('map', { zoomSnap: 0, zoomDelta: 0.5, zoomControl: true, attributionControl: true })
@@ -286,7 +286,7 @@ function handle(id, m) {
   if (m.t === 'p') {
     if (!GT.validPos(m.la, m.lo) || (m.ts && m.ts < p.ts)) return;
     p.la = m.la; p.lo = m.lo; p.ac = +m.ac || 0; p.ts = m.ts || 0; p.rx = Date.now(); p.hasPos = true;
-    p.trail.push([m.la, m.lo]); if (p.trail.length > 120) p.trail.shift();
+    p.trail.push([m.la, m.lo]); if (p.trail.length > 360) p.trail.shift();
   } else if (!p.hasPos) { p.rx = Date.now(); schedule(); return; }
   schedule();
 }
